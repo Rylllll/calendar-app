@@ -2,6 +2,7 @@ import { parseISO } from 'date-fns';
 import { StyleSheet, Text, View } from 'react-native';
 import Animated, { FadeInDown, LinearTransition } from 'react-native-reanimated';
 
+import { Pill } from '@/components/ui/pill';
 import { PlannerPressable } from '@/components/ui/planner-pressable';
 import { SectionCard } from '@/components/ui/section-card';
 import { useAppTheme } from '@/hooks/use-app-theme';
@@ -36,58 +37,52 @@ export function DayTimeline({
       </View>
       <View style={styles.column}>
         {sortedEvents.map((event, index) => {
-          const background =
-            event.category === 'travel'
-              ? theme.colors.accent
-              : event.category === 'prep'
-                ? theme.colors.accentSecondarySoft
-                : event.category === 'synced'
-                  ? theme.colors.backgroundSecondary
-                  : event.category === 'budget'
-                    ? theme.colors.surfaceStrong
-                    : theme.colors.surface;
-          const textColor = event.category === 'budget' ? '#FFFFFF' : theme.colors.text;
           const selected = selectedEventId === event.id;
 
           return (
             <Animated.View
-              entering={FadeInDown.delay(index * 35).springify()}
+              entering={FadeInDown.delay(index * 28).springify()}
               layout={LinearTransition.springify().damping(18)}
               key={event.id}
               style={styles.row}>
-              <Text style={[styles.time, { color: theme.colors.textMuted }]}>
-                {formatTimeline(event.start)}
-              </Text>
+              <View style={styles.timeColumn}>
+                <Text style={[styles.time, { color: theme.colors.textMuted }]}>
+                  {formatTimeline(event.start)}
+                </Text>
+                <View
+                  style={[
+                    styles.timeDot,
+                    { backgroundColor: getAccentColor(event.category, theme.colors) },
+                  ]}
+                />
+              </View>
+
               <PlannerPressable
                 haptic={!!onEventPress}
                 onPress={onEventPress ? () => onEventPress(event) : undefined}
                 style={[
-                  styles.block,
+                  styles.card,
                   {
-                    backgroundColor: background,
-                    borderColor: selected ? theme.colors.accentSecondary : 'transparent',
-                    borderWidth: selected ? 1 : 0,
+                    backgroundColor: theme.colors.surface,
+                    borderColor: selected ? theme.colors.accentSecondary : theme.colors.border,
                   },
                 ]}>
-                <View style={[styles.marker, { backgroundColor: theme.colors.surfaceStrong }]}>
-                  <Text style={styles.markerLabel}>{index + 1}</Text>
-                </View>
-                <View style={styles.blockBody}>
-                  <Text style={[styles.blockTitle, { color: textColor }]}>{event.title}</Text>
-                  <Text
-                    numberOfLines={1}
-                    style={[
-                      styles.blockCaption,
-                      { color: event.category === 'budget' ? '#E6E6E6' : theme.colors.textMuted },
-                    ]}>
-                    {formatTimeline(event.start)} - {formatTimeline(event.end)}
-                    {event.sourceCalendarTitle ? ` - ${event.sourceCalendarTitle}` : ''}
+                <View style={styles.cardHeader}>
+                  <Text numberOfLines={1} style={[styles.cardTitle, { color: theme.colors.text }]}>
+                    {event.title}
                   </Text>
+                  <Pill label={formatEventCategory(event)} tone={event.source === 'device' ? 'secondary' : 'dark'} />
                 </View>
-                {event.source === 'device' ? (
-                  <View style={[styles.sourceBadge, { backgroundColor: theme.colors.surface }]}>
-                    <Text style={[styles.sourceBadgeText, { color: theme.colors.text }]}>Phone</Text>
-                  </View>
+
+                <Text numberOfLines={1} style={[styles.cardMeta, { color: theme.colors.textMuted }]}>
+                  {formatTimeline(event.start)} - {formatTimeline(event.end)}
+                  {event.sourceCalendarTitle ? ` - ${event.sourceCalendarTitle}` : ''}
+                </Text>
+
+                {event.description || event.location?.name ? (
+                  <Text numberOfLines={1} style={[styles.cardHint, { color: theme.colors.textMuted }]}>
+                    {event.location?.name ?? event.description}
+                  </Text>
                 ) : null}
               </PlannerPressable>
             </Animated.View>
@@ -98,11 +93,62 @@ export function DayTimeline({
   );
 }
 
+function getAccentColor(
+  category: PlannerEvent['category'],
+  colors: {
+    accent: string;
+    accentSecondary: string;
+    textMuted: string;
+    surfaceStrong: string;
+  },
+) {
+  if (category === 'travel') {
+    return colors.accent;
+  }
+  if (category === 'prep') {
+    return colors.accentSecondary;
+  }
+  if (category === 'budget') {
+    return '#10b981';
+  }
+  if (category === 'wellness') {
+    return '#f59e0b';
+  }
+  if (category === 'synced') {
+    return colors.textMuted;
+  }
+  return colors.surfaceStrong;
+}
+
+function formatEventCategory(event: PlannerEvent) {
+  if (event.source === 'device') {
+    return 'Phone';
+  }
+
+  if (event.category === 'travel') {
+    return 'Travel';
+  }
+  if (event.category === 'prep') {
+    return 'Prep';
+  }
+  if (event.category === 'budget') {
+    return 'Budget';
+  }
+  if (event.category === 'booking') {
+    return 'Booking';
+  }
+  if (event.category === 'wellness') {
+    return 'Wellness';
+  }
+
+  return 'Plan';
+}
+
 const styles = StyleSheet.create({
   header: {
     flexDirection: 'row',
     justifyContent: 'space-between',
-    marginBottom: 16,
+    marginBottom: 14,
   },
   title: {
     fontFamily: 'Manrope_700Bold',
@@ -113,58 +159,54 @@ const styles = StyleSheet.create({
     fontSize: 12,
   },
   column: {
-    gap: 12,
+    gap: 8,
   },
   row: {
     flexDirection: 'row',
+    alignItems: 'stretch',
     gap: 10,
-    alignItems: 'center',
+  },
+  timeColumn: {
+    width: 56,
+    alignItems: 'flex-start',
+    paddingTop: 10,
+    gap: 6,
   },
   time: {
-    width: 68,
     fontFamily: 'Manrope_600SemiBold',
-    fontSize: 12,
+    fontSize: 11,
   },
-  block: {
+  timeDot: {
+    width: 10,
+    height: 10,
+    borderRadius: 5,
+  },
+  card: {
     flex: 1,
-    minHeight: 62,
-    borderRadius: 24,
+    minHeight: 72,
+    borderRadius: 18,
+    borderWidth: 1,
+    paddingHorizontal: 14,
+    paddingVertical: 12,
+    gap: 4,
+  },
+  cardHeader: {
     flexDirection: 'row',
+    justifyContent: 'space-between',
     alignItems: 'center',
-    paddingHorizontal: 10,
-    gap: 12,
+    gap: 10,
   },
-  marker: {
-    width: 34,
-    height: 34,
-    borderRadius: 17,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  markerLabel: {
-    color: '#FFFFFF',
-    fontFamily: 'Manrope_700Bold',
-    fontSize: 12,
-  },
-  blockBody: {
+  cardTitle: {
     flex: 1,
-    gap: 3,
-  },
-  blockTitle: {
     fontFamily: 'Manrope_700Bold',
     fontSize: 14,
   },
-  blockCaption: {
+  cardMeta: {
     fontFamily: 'Manrope_500Medium',
     fontSize: 12,
   },
-  sourceBadge: {
-    paddingHorizontal: 10,
-    paddingVertical: 7,
-    borderRadius: 999,
-  },
-  sourceBadgeText: {
-    fontFamily: 'Manrope_700Bold',
-    fontSize: 10,
+  cardHint: {
+    fontFamily: 'Manrope_500Medium',
+    fontSize: 11,
   },
 });

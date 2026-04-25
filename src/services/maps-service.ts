@@ -11,13 +11,14 @@ export function buildMapsDirectionsUrl(
   destination: Coordinates,
   destinationLabel: string,
   origin?: Coordinates,
+  travelMode: 'driving' | 'transit' | 'walking' = 'driving',
 ) {
   const params = [
     'api=1',
     `destination=${encodeURIComponent(
       `${destination.latitude},${destination.longitude} (${destinationLabel})`,
     )}`,
-    'travelmode=driving',
+    `travelmode=${travelMode}`,
   ];
 
   if (origin) {

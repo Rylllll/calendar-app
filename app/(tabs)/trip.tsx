@@ -3,6 +3,7 @@ import { useEffect } from 'react';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { AnimatedMenuButton } from '@/components/navigation/animated-menu-button';
+import { BookedDestinationCard } from '@/components/planner/booked-destination-card';
 import { BookingAssistantCard } from '@/components/planner/booking-assistant-card';
 import { CheckInCard } from '@/components/planner/check-in-card';
 import { ChecklistCard } from '@/components/planner/checklist-card';
@@ -75,6 +76,12 @@ export default function TripScreen() {
               onPress: () => router.push('/map-itinerary'),
             },
             {
+              id: 'booked',
+              label: 'Booked destinations',
+              icon: 'ticket-confirmation-outline',
+              onPress: () => router.push('/booked-destinations' as never),
+            },
+            {
               id: 'toggle',
               label: 'Toggle trip mode',
               icon: trip.tripModeEnabled ? 'toggle-switch' : 'toggle-switch-off-outline',
@@ -143,6 +150,10 @@ export default function TripScreen() {
             currencyCode={currency.currency}
             currencyLocale={currency.locale}
           />
+
+          {trip.activeTrip.confirmedBooking ? (
+            <BookedDestinationCard trip={trip.activeTrip} />
+          ) : null}
 
           <SmartScheduleCard events={trip.smartScheduleBlocks} />
 

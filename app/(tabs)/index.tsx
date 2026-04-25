@@ -1,5 +1,5 @@
-import { router } from 'expo-router';
 import { isAfter, parseISO } from 'date-fns';
+import { router } from 'expo-router';
 import { StyleSheet, Text, View } from 'react-native';
 
 import { AnimatedMenuButton } from '@/components/navigation/animated-menu-button';
@@ -17,6 +17,7 @@ import { useBudget } from '@/hooks/use-budget';
 import { useCalendar } from '@/hooks/use-calendar';
 import { useDeviceCalendar } from '@/hooks/use-device-calendar';
 import { useDeviceLocation } from '@/hooks/use-device-location';
+import { usePlanner } from '@/hooks/use-planner';
 import { useTrip } from '@/hooks/use-trip';
 import { DeviceCalendarEvent, Trip } from '@/types/domain';
 import { formatShortDate } from '@/utils/date';
@@ -24,43 +25,53 @@ import { formatCurrency } from '@/utils/format';
 
 export default function HomeScreen() {
   const theme = useAppTheme();
+  const planner = usePlanner();
+  const isTripMode = planner.tripModeEnabled;
+  
   const { days, combinedAgenda, selectedDate, setSelectedDate } = useCalendar();
   const budget = useBudget();
   const trip = useTrip();
   const deviceCalendar = useDeviceCalendar();
   const deviceLocation = useDeviceLocation();
 
-  const upcomingTrips = [...trip.trips]
-    .filter((item) => isAfter(new Date(item.endDate), new Date()))
-    .sort(
-      (left, right) => new Date(left.startDate).getTime() - new Date(right.startDate).getTime(),
-    );
+  const upcomingTrips = isTripMode 
+    ? [...trip.trips]
+        .filter((item) => isAfter(new Date(item.endDate), new Date()))
+        .sort((left, right) => new Date(left.startDate).getTime() - new Date(right.startDate).getTime())
+    : [];
+
   const travelEvents = deviceCalendar.upcomingDeviceEvents.filter(isTravelCalendarEvent);
   const summaryItems = buildSummaryItems(upcomingTrips, travelEvents).slice(0, 5);
-  const subtitle =
-    summaryItems.length > 0
-      ? `${summaryItems.length} upcoming plan${summaryItems.length > 1 ? 's' : ''} across trips and your phone calendar.`
-      : 'Sync your phone calendar or build a trip to start populating the planner.';
+  
+  const tripSubtitle = summaryItems.length > 0
+    ? `${summaryItems.length} upcoming plan${summaryItems.length > 1 ? 's' : ''} across trips and your phone calendar.`
+    : 'Sync your phone calendar or build a trip to start populating the planner.';
+    
+  const normalSubtitle = deviceCalendar.deviceCalendarEvents.length > 0
+    ? `${deviceCalendar.deviceCalendarEvents.length} events synced from your calendar.`
+    : 'Sync your phone calendar to view your upcoming events.';
 
   return (
     <ScreenShell
-      title="Task Schedule"
-      subtitle={subtitle}
+      title={isTripMode ? "Task Schedule" : "Calendar Dashboard"}
+      subtitle={isTripMode ? tripSubtitle : normalSubtitle}
       rightAction={
         <AnimatedMenuButton
           actions={[
-            {
-              id: 'trip',
-              label: 'Trip planner',
-              icon: 'map-search-outline',
-              onPress: () => router.push('/(tabs)/trip'),
-            },
-            {
-              id: 'map',
-              label: 'Map itinerary',
-              icon: 'map-marker-path',
-              onPress: () => router.push('/map-itinerary'),
-            },
+            ...(isTripMode ? [
+              {
+                id: 'trip',
+                label: 'Trip planner',
+                icon: 'map-search-outline' as const,
+                onPress: () => router.push('/(tabs)/trip'),
+              },
+              {
+                id: 'map',
+                label: 'Map itinerary',
+                icon: 'map-marker-path' as const,
+                onPress: () => router.push('/map-itinerary'),
+              },
+            ] : []),
             {
               id: 'location',
               label: 'Sync location',
@@ -77,12 +88,12 @@ export default function HomeScreen() {
         />
       }>
       <View style={styles.pillRow}>
-        <Pill label={`${upcomingTrips.length} saved trips`} tone="dark" />
+        {isTripMode && upcomingTrips.length > 0 && <Pill label={`${upcomingTrips.length} saved trips`} tone="dark" />}
         <Pill
           label={`${deviceCalendar.deviceCalendarEvents.length} synced events`}
           tone="secondary"
         />
-        {trip.activeTrip ? (
+        {isTripMode && trip.activeTrip ? (
           <Pill label={`${trip.reminders.length} reminders`} tone="secondary" />
         ) : null}
         {deviceLocation.deviceLocation ? (
@@ -93,46 +104,50 @@ export default function HomeScreen() {
         ) : null}
       </View>
 
-      <SectionCard variant="accent">
-        <Text style={[styles.heroEyebrow, { color: theme.colors.textMuted }]}>
-          Plans and travels
-        </Text>
-        <Text style={[styles.heroTitle, { color: theme.colors.text }]}>
-          {upcomingTrips[0]
-            ? `Next trip: ${upcomingTrips[0].destination.name}`
-            : 'Your dashboard is ready for live data'}
-        </Text>
-        <Text style={[styles.heroCaption, { color: theme.colors.textMuted }]}>
-          {upcomingTrips[0]
-            ? `${formatShortDate(upcomingTrips[0].startDate)} to ${formatShortDate(upcomingTrips[0].endDate)} - ${upcomingTrips[0].assistantSummary}`
-            : 'Trip plans, calendar events, and current location all stay local-first on the device.'}
-        </Text>
-        <View style={styles.metrics}>
-          <Metric
-            label="Today"
-            value={String(
-              combinedAgenda.length + trip.predictiveBlocks.length + trip.smartScheduleBlocks.length,
-            )}
-          />
-          <Metric label="Travel" value={String(upcomingTrips.length + travelEvents.length)} />
-          <Metric
-            label="Budget"
-            value={formatCurrency(Math.max(budget.remaining, 0), {
-              currency: budget.currencyCode,
-              locale: budget.currencyLocale,
-            })}
-          />
-        </View>
-      </SectionCard>
+      {isTripMode && (
+        <SectionCard variant="accent">
+          <Text style={[styles.heroEyebrow, { color: theme.colors.textMuted }]}>
+            Plans and travels
+          </Text>
+          <Text style={[styles.heroTitle, { color: theme.colors.text }]}>
+            {upcomingTrips[0]
+              ? `Next trip: ${upcomingTrips[0].destination.name}`
+              : 'Your dashboard is ready for live data'}
+          </Text>
+          <Text style={[styles.heroCaption, { color: theme.colors.textMuted }]}>
+            {upcomingTrips[0]
+              ? `${formatShortDate(upcomingTrips[0].startDate)} to ${formatShortDate(upcomingTrips[0].endDate)} - ${upcomingTrips[0].assistantSummary}`
+              : 'Trip plans, calendar events, and current location all stay local-first on the device.'}
+          </Text>
+          <View style={styles.metrics}>
+            <Metric
+              label="Today"
+              value={String(
+                combinedAgenda.length + trip.predictiveBlocks.length + trip.smartScheduleBlocks.length,
+              )}
+            />
+            <Metric label="Travel" value={String(upcomingTrips.length + travelEvents.length)} />
+            <Metric
+              label="Budget"
+              value={formatCurrency(Math.max(budget.remaining, 0), {
+                currency: budget.currencyCode,
+                locale: budget.currencyLocale,
+              })}
+            />
+          </View>
+        </SectionCard>
+      )}
 
-      <JourneyBridgeCard
-        trip={trip.activeTrip}
-        instruction={
-          trip.activeTrip
-            ? 'Start here for the overview, then open Calendar to verify timing and Budget to keep the trip inside the local currency cap.'
-            : 'Create the trip in the Trip tab first, then this dashboard will summarize the route, timing, and budget automatically.'
-        }
-      />
+      {isTripMode && (
+        <JourneyBridgeCard
+          trip={trip.activeTrip}
+          instruction={
+            trip.activeTrip
+              ? 'Start here for the overview, then open Calendar to verify timing and Budget to keep the trip inside the local currency cap.'
+              : 'Create the trip in the Trip tab first, then this dashboard will summarize the route, timing, and budget automatically.'
+          }
+        />
+      )}
 
       <MiniCalendar days={days} selectedDate={selectedDate} onSelect={setSelectedDate} />
 
@@ -156,7 +171,7 @@ export default function HomeScreen() {
       <SectionCard>
         <View style={styles.sectionHeader}>
           <Text style={[styles.sectionTitle, { color: theme.colors.text }]}>
-            Summary of plans and travels
+            {isTripMode ? "Summary of plans and travels" : "Upcoming events"}
           </Text>
           <Text style={[styles.sectionCaption, { color: theme.colors.textMuted }]}>
             {summaryItems.length} upcoming
@@ -182,25 +197,31 @@ export default function HomeScreen() {
           </View>
         ) : (
           <Text style={[styles.emptyText, { color: theme.colors.textMuted }]}>
-            No real plans are loaded yet. Sync your phone calendar or create a trip in the Trip
-            tab.
+            {isTripMode 
+              ? "No real plans are loaded yet. Sync your phone calendar or create a trip in the Trip tab."
+              : "No upcoming events. Sync your phone calendar to see your schedule."}
           </Text>
         )}
       </SectionCard>
 
       <DayTimeline
-        events={[...trip.predictiveBlocks, ...trip.smartScheduleBlocks, ...combinedAgenda]}
-        title="Smart day plan"
+        events={isTripMode 
+          ? [...trip.predictiveBlocks, ...trip.smartScheduleBlocks, ...combinedAgenda] 
+          : combinedAgenda
+        }
+        title={isTripMode ? "Smart day plan" : "Today's Agenda"}
       />
 
-      <BudgetOverviewCard
-        total={budget.total}
-        target={budget.target}
-        remaining={budget.remaining}
-        suggestions={budget.suggestions}
-        currencyCode={budget.currencyCode}
-        currencyLocale={budget.currencyLocale}
-      />
+      {isTripMode && (
+        <BudgetOverviewCard
+          total={budget.total}
+          target={budget.target}
+          remaining={budget.remaining}
+          suggestions={budget.suggestions}
+          currencyCode={budget.currencyCode}
+          currencyLocale={budget.currencyLocale}
+        />
+      )}
     </ScreenShell>
   );
 }

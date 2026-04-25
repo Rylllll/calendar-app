@@ -36,6 +36,13 @@ interface NominatimPlace {
   category?: string;
 }
 
+const hubOrder: TransportHubType[] = [
+  'airport',
+  'bus_terminal',
+  'rail_station',
+  'ferry_terminal',
+];
+
 export async function fetchTransportContext(
   origin: Place,
   destination: Place,
@@ -59,22 +66,19 @@ async function fetchNearbyHubs(
   place: Place,
   area: 'origin' | 'destination',
 ): Promise<TransportHub[]> {
-  const [overpassAirports, overpassBusStations] = await Promise.all([
-    fetchOverpassHubs(place, area, 'airport'),
-    fetchOverpassHubs(place, area, 'bus_terminal'),
-  ]);
+  const hubGroups = await Promise.all(
+    hubOrder.map(async (type) => {
+      const overpassResults = await fetchOverpassHubs(place, area, type).catch(() => []);
+      if (overpassResults.length) {
+        return overpassResults;
+      }
 
-  const airports =
-    overpassAirports.length > 0
-      ? overpassAirports
-      : await fetchFallbackSearchHubs(place, area, 'airport');
-  const busStations =
-    overpassBusStations.length > 0
-      ? overpassBusStations
-      : await fetchFallbackSearchHubs(place, area, 'bus_terminal');
+      return fetchFallbackSearchHubs(place, area, type).catch(() => []);
+    }),
+  );
 
   const deduped = new Map<string, TransportHub>();
-  [...airports, ...busStations].forEach((hub) => {
+  hubGroups.flat().forEach((hub) => {
     const key = `${hub.type}:${hub.name.toLowerCase()}`;
     if (!deduped.has(key)) {
       deduped.set(key, hub);
@@ -82,8 +86,9 @@ async function fetchNearbyHubs(
   });
 
   return [...deduped.values()].sort((left, right) => {
-    if (left.type !== right.type) {
-      return left.type === 'airport' ? -1 : 1;
+    const typeDelta = hubOrder.indexOf(left.type) - hubOrder.indexOf(right.type);
+    if (typeDelta !== 0) {
+      return typeDelta;
     }
 
     return extractDistanceKm(left.subtitle) - extractDistanceKm(right.subtitle);
@@ -95,33 +100,12 @@ async function fetchOverpassHubs(
   area: 'origin' | 'destination',
   type: TransportHubType,
 ) {
-  const radius = type === 'airport' ? 120000 : 28000;
-  const query =
-    type === 'airport'
-      ? [
-          '[out:json][timeout:25];',
-          '(',
-          `nwr["aeroway"="aerodrome"]["iata"](around:${radius},${place.latitude},${place.longitude});`,
-          `nwr["aeroway"="aerodrome"]["icao"](around:${radius},${place.latitude},${place.longitude});`,
-          `nwr["aeroway"="aerodrome"]["aerodrome:type"~"international|public|regional"](around:${radius},${place.latitude},${place.longitude});`,
-          ');',
-          'out center 60;',
-        ].join('')
-      : [
-          '[out:json][timeout:25];',
-          '(',
-          `nwr["amenity"="bus_station"](around:${radius},${place.latitude},${place.longitude});`,
-          `nwr["highway"="bus_station"](around:${radius},${place.latitude},${place.longitude});`,
-          ');',
-          'out center 60;',
-        ].join('');
-
   const response = await fetch('https://overpass-api.de/api/interpreter', {
     method: 'POST',
     headers: {
       'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
     },
-    body: `data=${encodeURIComponent(query)}`,
+    body: `data=${encodeURIComponent(buildOverpassQuery(place, type))}`,
   });
 
   if (!response.ok) {
@@ -129,7 +113,6 @@ async function fetchOverpassHubs(
   }
 
   const payload = (await response.json()) as OverpassResponse;
-
   return payload.elements
     .map((element) => mapToTransportHub(element, place, area, type))
     .filter((value): value is TransportHub => Boolean(value))
@@ -141,29 +124,99 @@ async function fetchFallbackSearchHubs(
   area: 'origin' | 'destination',
   type: TransportHubType,
 ) {
-  const query = `${place.name} ${type === 'airport' ? 'airport' : 'bus terminal'} ${
-    place.country ?? ''
-  }`.trim();
-  const url =
-    'https://nominatim.openstreetmap.org/search' +
-    `?format=jsonv2&limit=5&q=${encodeURIComponent(query)}` +
-    (place.countryCode ? `&countrycodes=${place.countryCode.toLowerCase()}` : '');
+  const queries = buildFallbackQueries(place, type);
 
-  const response = await fetch(url, {
-    headers: {
-      'Accept-Language': 'en',
-      'User-Agent': 'VoyagrPlanner/1.0 (calendar travel planner)',
-    },
-  });
+  for (const query of queries) {
+    const url =
+      'https://nominatim.openstreetmap.org/search' +
+      `?format=jsonv2&limit=6&q=${encodeURIComponent(query)}` +
+      (place.countryCode ? `&countrycodes=${place.countryCode.toLowerCase()}` : '');
 
-  if (!response.ok) {
-    return [];
+    const response = await fetch(url, {
+      headers: {
+        'Accept-Language': 'en',
+        'User-Agent': 'VoyagrPlanner/1.0 (calendar travel planner)',
+      },
+    });
+
+    if (!response.ok) {
+      continue;
+    }
+
+    const payload = (await response.json()) as NominatimPlace[];
+    const hubs = payload
+      .map((item) => mapSearchResultToHub(item, place, area, type))
+      .filter((value): value is TransportHub => Boolean(value));
+
+    if (hubs.length) {
+      return hubs;
+    }
   }
 
-  const payload = (await response.json()) as NominatimPlace[];
-  return payload
-    .map((item) => mapSearchResultToHub(item, place, area, type))
-    .filter((value): value is TransportHub => Boolean(value));
+  return [];
+}
+
+function buildOverpassQuery(place: Place, type: TransportHubType) {
+  if (type === 'airport') {
+    return [
+      '[out:json][timeout:25];',
+      '(',
+      `nwr["aeroway"="aerodrome"]["iata"](around:120000,${place.latitude},${place.longitude});`,
+      `nwr["aeroway"="aerodrome"]["icao"](around:120000,${place.latitude},${place.longitude});`,
+      `nwr["aeroway"="aerodrome"]["aerodrome:type"~"international|public|regional|civil"](around:120000,${place.latitude},${place.longitude});`,
+      ');',
+      'out center 60;',
+    ].join('');
+  }
+
+  if (type === 'bus_terminal') {
+    return [
+      '[out:json][timeout:25];',
+      '(',
+      `nwr["amenity"="bus_station"](around:28000,${place.latitude},${place.longitude});`,
+      `nwr["highway"="bus_station"](around:28000,${place.latitude},${place.longitude});`,
+      ');',
+      'out center 60;',
+    ].join('');
+  }
+
+  if (type === 'rail_station') {
+    return [
+      '[out:json][timeout:25];',
+      '(',
+      `nwr["railway"~"station|halt"](around:26000,${place.latitude},${place.longitude});`,
+      `nwr["public_transport"="station"](around:26000,${place.latitude},${place.longitude});`,
+      ');',
+      'out center 60;',
+    ].join('');
+  }
+
+  return [
+    '[out:json][timeout:25];',
+    '(',
+    `nwr["amenity"="ferry_terminal"](around:26000,${place.latitude},${place.longitude});`,
+    `nwr["building"="ferry_terminal"](around:26000,${place.latitude},${place.longitude});`,
+    ');',
+    'out center 60;',
+  ].join('');
+}
+
+function buildFallbackQueries(place: Place, type: TransportHubType) {
+  const base = [place.name, place.country].filter(Boolean).join(' ');
+
+  if (type === 'airport') {
+    return [`${base} airport`, `${base} international airport`];
+  }
+
+  if (type === 'bus_terminal') {
+    return [`${base} bus terminal`, `${base} bus station`];
+  }
+
+  if (type === 'rail_station') {
+    return [`${base} railway station`, `${base} train station`];
+  }
+
+  return [`${base} ferry terminal`, `${base} port terminal`];
 }
 
 function mapToTransportHub(
@@ -184,16 +237,12 @@ function mapToTransportHub(
   }
 
   const type = resolveHubType(tags);
-  if (!type || type !== expectedType) {
-    return null;
-  }
-
-  if (!isVerifiedHub(tags, type)) {
+  if (!type || type !== expectedType || !isVerifiedHub(tags, type)) {
     return null;
   }
 
   const distanceKm = haversineKm(anchor, coordinates);
-  if ((type === 'airport' && distanceKm > 140) || (type === 'bus_terminal' && distanceKm > 30)) {
+  if (distanceKm > getMaxDistanceKm(type)) {
     return null;
   }
 
@@ -216,30 +265,18 @@ function mapSearchResultToHub(
   area: 'origin' | 'destination',
   expectedType: TransportHubType,
 ): TransportHub | null {
-  const lowerDisplay = item.display_name.toLowerCase();
-  const looksLikeAirport =
-    lowerDisplay.includes('airport') || lowerDisplay.includes('international airport');
-  const looksLikeBusTerminal =
-    lowerDisplay.includes('bus station') ||
-    lowerDisplay.includes('bus terminal') ||
-    lowerDisplay.includes('transport terminal');
-
-  if (
-    (expectedType === 'airport' && !looksLikeAirport) ||
-    (expectedType === 'bus_terminal' && !looksLikeBusTerminal)
-  ) {
+  const latitude = Number(item.lat);
+  const longitude = Number(item.lon);
+  if (Number.isNaN(latitude) || Number.isNaN(longitude)) {
     return null;
   }
 
-  const latitude = Number(item.lat);
-  const longitude = Number(item.lon);
+  if (!looksLikeTransportHub(item, expectedType)) {
+    return null;
+  }
+
   const distanceKm = haversineKm(anchor, { latitude, longitude });
-  if (
-    Number.isNaN(latitude) ||
-    Number.isNaN(longitude) ||
-    (expectedType === 'airport' && distanceKm > 160) ||
-    (expectedType === 'bus_terminal' && distanceKm > 35)
-  ) {
+  if (distanceKm > getSearchMaxDistanceKm(expectedType)) {
     return null;
   }
 
@@ -269,6 +306,18 @@ function resolveHubType(tags: Record<string, string>): TransportHubType | null {
     return 'bus_terminal';
   }
 
+  if (
+    tags.railway === 'station' ||
+    tags.railway === 'halt' ||
+    tags.public_transport === 'station'
+  ) {
+    return 'rail_station';
+  }
+
+  if (tags.amenity === 'ferry_terminal' || tags.building === 'ferry_terminal') {
+    return 'ferry_terminal';
+  }
+
   return null;
 }
 
@@ -294,7 +343,46 @@ function isVerifiedHub(tags: Record<string, string>, type: TransportHubType) {
     );
   }
 
-  return name.includes('bus') || name.includes('terminal') || name.includes('station');
+  if (type === 'bus_terminal') {
+    return name.includes('bus') || name.includes('terminal') || name.includes('station');
+  }
+
+  if (type === 'rail_station') {
+    return name.includes('station') || Boolean(tags.railway === 'station' || tags.railway === 'halt');
+  }
+
+  return (
+    name.includes('ferry') ||
+    name.includes('pier') ||
+    name.includes('port') ||
+    name.includes('harbor') ||
+    name.includes('harbour') ||
+    name.includes('terminal')
+  );
+}
+
+function looksLikeTransportHub(item: NominatimPlace, type: TransportHubType) {
+  const searchText = `${item.display_name} ${item.type ?? ''} ${item.category ?? ''}`.toLowerCase();
+
+  if (type === 'airport') {
+    return searchText.includes('airport');
+  }
+
+  if (type === 'bus_terminal') {
+    return ['bus station', 'bus terminal', 'transport terminal'].some((keyword) =>
+      searchText.includes(keyword),
+    );
+  }
+
+  if (type === 'rail_station') {
+    return ['railway station', 'train station', 'station', 'rail'].some((keyword) =>
+      searchText.includes(keyword),
+    );
+  }
+
+  return ['ferry', 'pier', 'port', 'harbor', 'harbour'].some((keyword) =>
+    searchText.includes(keyword),
+  );
 }
 
 function buildTransportConnections(
@@ -313,6 +401,12 @@ function buildTransportConnections(
   const destinationBusStations = hubs.filter(
     (hub) => hub.area === 'destination' && hub.type === 'bus_terminal',
   );
+  const originRailStations = hubs.filter(
+    (hub) => hub.area === 'origin' && hub.type === 'rail_station',
+  );
+  const destinationRailStations = hubs.filter(
+    (hub) => hub.area === 'destination' && hub.type === 'rail_station',
+  );
   const distanceKm = haversineKm(origin, destination);
 
   const flightOptions = originAirports.flatMap((originHub) =>
@@ -330,7 +424,16 @@ function buildTransportConnections(
         )
       : [];
 
-  return [...flightOptions, ...busOptions]
+  const railOptions =
+    distanceKm <= 760
+      ? originRailStations.flatMap((originHub) =>
+          destinationRailStations.map((destinationHub, index) =>
+            createRailConnection(originHub, destinationHub, distanceKm, currencyCode, index),
+          ),
+        )
+      : [];
+
+  return [...flightOptions, ...busOptions, ...railOptions]
     .sort((left, right) => left.estimatedPrice - right.estimatedPrice)
     .slice(0, 8);
 }
@@ -349,12 +452,12 @@ function createFlightConnection(
     id: `flight-${originHub.id}-${destinationHub.id}`,
     mode: 'flight',
     title: `${formatHubName(originHub)} to ${formatHubName(destinationHub)}`,
-    subtitle: 'Verified airport connection near your origin and destination',
+    subtitle: 'Verified airport route built from live hub data',
     estimatedPrice: adjustPriceForCurrency(basePrice, currencyCode),
     durationMinutes,
     originHub,
     destinationHub,
-    mapsUrl: buildMapsDirectionsUrl(destinationHub, destinationHub.name, originHub),
+    mapsUrl: buildMapsDirectionsUrl(destinationHub, destinationHub.name, originHub, 'driving'),
     bookingUrl: buildFlightSearchUrl(originHub.name, destinationHub.name),
   };
 }
@@ -373,13 +476,37 @@ function createBusConnection(
     id: `bus-${originHub.id}-${destinationHub.id}`,
     mode: 'bus',
     title: `${formatHubName(originHub)} to ${formatHubName(destinationHub)}`,
-    subtitle: 'Verified bus-terminal route for this trip range',
+    subtitle: 'Verified bus-terminal route with local fare estimate',
     estimatedPrice: adjustPriceForCurrency(basePrice, currencyCode),
     durationMinutes,
     originHub,
     destinationHub,
-    mapsUrl: buildMapsDirectionsUrl(destinationHub, destinationHub.name, originHub),
-    bookingUrl: buildMapsDirectionsUrl(destinationHub, destinationHub.name, originHub),
+    mapsUrl: buildMapsDirectionsUrl(destinationHub, destinationHub.name, originHub, 'transit'),
+    bookingUrl: buildMapsDirectionsUrl(destinationHub, destinationHub.name, originHub, 'transit'),
+  };
+}
+
+function createRailConnection(
+  originHub: TransportHub,
+  destinationHub: TransportHub,
+  distanceKm: number,
+  currencyCode: string,
+  index: number,
+): TransportConnection {
+  const basePrice = clamp(Math.round(distanceKm * 0.05 + 14 + index * 6), 12, 420);
+  const durationMinutes = Math.round((distanceKm / 90) * 60 + 35 + index * 8);
+
+  return {
+    id: `rail-${originHub.id}-${destinationHub.id}`,
+    mode: 'rail',
+    title: `${formatHubName(originHub)} to ${formatHubName(destinationHub)}`,
+    subtitle: 'Verified rail-station route with local fare estimate',
+    estimatedPrice: adjustPriceForCurrency(basePrice, currencyCode),
+    durationMinutes,
+    originHub,
+    destinationHub,
+    mapsUrl: buildMapsDirectionsUrl(destinationHub, destinationHub.name, originHub, 'transit'),
+    bookingUrl: buildMapsDirectionsUrl(destinationHub, destinationHub.name, originHub, 'transit'),
   };
 }
 
@@ -388,9 +515,43 @@ function formatHubName(hub: TransportHub) {
 }
 
 function buildHubSubtitle(type: TransportHubType, distanceKm: number, anchorName: string) {
-  return type === 'airport'
-    ? `${round(distanceKm, 1)} km from ${anchorName}`
-    : `Terminal ${round(distanceKm, 1)} km from ${anchorName}`;
+  if (type === 'airport') {
+    return `${round(distanceKm, 1)} km from ${anchorName}`;
+  }
+
+  if (type === 'bus_terminal') {
+    return `Bus terminal ${round(distanceKm, 1)} km from ${anchorName}`;
+  }
+
+  if (type === 'rail_station') {
+    return `Rail station ${round(distanceKm, 1)} km from ${anchorName}`;
+  }
+
+  return `Ferry terminal ${round(distanceKm, 1)} km from ${anchorName}`;
+}
+
+function getMaxDistanceKm(type: TransportHubType) {
+  if (type === 'airport') {
+    return 140;
+  }
+
+  if (type === 'bus_terminal') {
+    return 30;
+  }
+
+  return 26;
+}
+
+function getSearchMaxDistanceKm(type: TransportHubType) {
+  if (type === 'airport') {
+    return 160;
+  }
+
+  if (type === 'bus_terminal') {
+    return 35;
+  }
+
+  return 30;
 }
 
 function extractDistanceKm(value: string) {

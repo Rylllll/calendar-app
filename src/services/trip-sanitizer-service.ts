@@ -58,10 +58,25 @@ function isLikelyRealTransportHub(hub: TransportHub) {
     return Boolean(hub.code || normalizedName.includes('airport'));
   }
 
+  if (hub.type === 'bus_terminal') {
+    return (
+      normalizedName.includes('bus') ||
+      normalizedName.includes('terminal') ||
+      normalizedName.includes('station')
+    );
+  }
+
+  if (hub.type === 'rail_station') {
+    return normalizedName.includes('station') || normalizedName.includes('rail');
+  }
+
   return (
-    normalizedName.includes('bus') ||
-    normalizedName.includes('terminal') ||
-    normalizedName.includes('station')
+    normalizedName.includes('ferry') ||
+    normalizedName.includes('pier') ||
+    normalizedName.includes('port') ||
+    normalizedName.includes('harbor') ||
+    normalizedName.includes('harbour') ||
+    normalizedName.includes('terminal')
   );
 }
 

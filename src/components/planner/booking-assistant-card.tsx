@@ -1,32 +1,27 @@
 import { MaterialCommunityIcons } from '@expo/vector-icons';
-import { addDays, format } from 'date-fns';
-import { useEffect, useState } from 'react';
-import {
-  Alert,
-  StyleSheet,
-  Text,
-  TextInput,
-  View,
-} from 'react-native';
+import * as Linking from 'expo-linking';
+import { useState } from 'react';
+import { ActivityIndicator, StyleSheet, Text, TextInput, View } from 'react-native';
 
 import { Pill } from '@/components/ui/pill';
 import { PlannerPressable } from '@/components/ui/planner-pressable';
 import { SectionCard } from '@/components/ui/section-card';
 import { useAppTheme } from '@/hooks/use-app-theme';
 import {
-  PlanTripInput,
-  PlannedTripPayload,
-  planTripWithAssistant,
-} from '@/services/trip-planner-service';
+  BookingDraft,
+  buildBookingDraft,
+  confirmBookingDraft,
+} from '@/services/booking-service';
+import { PlannedTripPayload } from '@/services/trip-planner-service';
 import { DeviceLocationSnapshot, Trip } from '@/types/domain';
+import { formatShortDate } from '@/utils/date';
+import { formatCurrency } from '@/utils/format';
 
 interface BookingAssistantCardProps {
-  activeTrip?: Trip;
-  origin?: DeviceLocationSnapshot | null;
-  onTripReady: (payload: PlannedTripPayload) => void;
+  activeTrip?: Trip | null;
+  origin: DeviceLocationSnapshot | null;
+  onTripReady: (data: PlannedTripPayload) => void;
 }
-
-const interestOptions = ['Food', 'Culture', 'Coffee', 'Nature', 'Easy'];
 
 export function BookingAssistantCard({
   activeTrip,
@@ -34,264 +29,240 @@ export function BookingAssistantCard({
   onTripReady,
 }: BookingAssistantCardProps) {
   const theme = useAppTheme();
-  const [destinationQuery, setDestinationQuery] = useState(activeTrip?.destination.name ?? '');
-  const [startDate, setStartDate] = useState(
-    activeTrip ? format(new Date(activeTrip.startDate), 'yyyy-MM-dd') : format(new Date(), 'yyyy-MM-dd'),
-  );
-  const [endDate, setEndDate] = useState(
-    activeTrip
-      ? format(new Date(activeTrip.endDate), 'yyyy-MM-dd')
-      : format(addDays(new Date(), 2), 'yyyy-MM-dd'),
-  );
-  const [groupSize, setGroupSize] = useState(String(activeTrip?.groupSize ?? 1));
-  const [budgetCeiling, setBudgetCeiling] = useState(
-    String(activeTrip?.bookingPreference.budgetCeiling ?? 900),
-  );
-  const [request, setRequest] = useState(activeTrip?.vibe ?? '');
-  const [interests, setInterests] = useState<string[]>(
-    activeTrip?.assistantSummary
-      ? interestOptions.filter((interest) =>
-          activeTrip.assistantSummary.toLowerCase().includes(interest.toLowerCase()),
-        )
-      : ['Food', 'Culture'],
-  );
+  const [prompt, setPrompt] = useState('');
   const [loading, setLoading] = useState(false);
+  const [draft, setDraft] = useState<BookingDraft | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [confirmedReference, setConfirmedReference] = useState<string | null>(null);
 
-  useEffect(() => {
-    if (!activeTrip) {
+  const handleAISearch = async () => {
+    if (!prompt.trim()) {
       return;
     }
 
-    setDestinationQuery(activeTrip.destination.name);
-    setStartDate(format(new Date(activeTrip.startDate), 'yyyy-MM-dd'));
-    setEndDate(format(new Date(activeTrip.endDate), 'yyyy-MM-dd'));
-    setGroupSize(String(activeTrip.groupSize));
-    setBudgetCeiling(String(activeTrip.bookingPreference.budgetCeiling));
-    setRequest(activeTrip.vibe);
-  }, [activeTrip]);
-
-  const toggleInterest = (interest: string) => {
-    setInterests((current) =>
-      current.includes(interest)
-        ? current.filter((item) => item !== interest)
-        : [...current, interest],
-    );
-  };
-
-  const submit = async () => {
-    if (!destinationQuery.trim()) {
-      Alert.alert('Destination required', 'Enter a city or area to build the trip.');
-      return;
-    }
-
-    if (!startDate || !endDate) {
-      Alert.alert('Dates required', 'Provide both start and end dates in YYYY-MM-DD format.');
-      return;
-    }
-
-    const payload: PlanTripInput = {
-      destinationQuery: destinationQuery.trim(),
-      startDate,
-      endDate,
-      groupSize: Math.max(1, Number(groupSize) || 1),
-      budgetCeiling: Math.max(150, Number(budgetCeiling) || 150),
-      interests: interests.length ? interests : ['Food', 'Culture'],
-      request,
-      origin,
-    };
+    setLoading(true);
+    setError(null);
+    setDraft(null);
+    setConfirmedReference(null);
 
     try {
-      setLoading(true);
-      const result = await planTripWithAssistant(payload);
-      onTripReady(result);
+      const nextDraft = await buildBookingDraft(prompt, origin, activeTrip);
+      setDraft(nextDraft);
     } catch {
-      Alert.alert(
-        'Trip planning failed',
-        'The trip assistant could not build this itinerary. Check the destination and try again.',
+      setError(
+        'I could not build a booking draft from that request. Try a clearer destination and a simple date hint like next week or weekend.',
       );
     } finally {
       setLoading(false);
     }
   };
 
+  const handleConfirm = () => {
+    if (!draft) {
+      return;
+    }
+
+    const payload = confirmBookingDraft(draft);
+    onTripReady(payload);
+    setDraft({
+      ...draft,
+      trip: payload.trip,
+    });
+    setConfirmedReference(payload.trip.confirmedBooking?.reference ?? null);
+  };
+
   return (
-    <SectionCard variant="secondary" style={styles.card}>
+    <SectionCard variant="accent">
       <View style={styles.header}>
         <View style={styles.headerBody}>
-          <Text style={[styles.title, { color: theme.colors.text }]}>
-            AI booking assistant
-          </Text>
+          <View style={styles.titleRow}>
+            <MaterialCommunityIcons name="robot-outline" size={22} color={theme.colors.text} />
+            <Text style={[styles.title, { color: theme.colors.text }]}>Auto-booking assistant</Text>
+          </View>
           <Text style={[styles.caption, { color: theme.colors.textMuted }]}>
-            Ask for a destination, budget, and travel vibe. Voyagr builds the trip locally and prepares booking links.
+            Give one sentence with destination, rough date, and headcount. The app drafts a trip,
+            pulls live transport hubs, and waits for your confirmation.
           </Text>
         </View>
-        <View
-          style={[
-            styles.iconBubble,
-            { backgroundColor: theme.colors.surfaceStrong },
-          ]}>
-          <MaterialCommunityIcons name="creation-outline" size={18} color="#FFFFFF" />
-        </View>
+        <Pill label="Confirm first" tone="dark" />
       </View>
 
-      <View style={styles.pills}>
-        <Pill
-          label={origin ? `From ${origin.city ?? origin.label}` : 'No live origin yet'}
-          tone="dark"
-        />
-        <Pill label={activeTrip ? 'Editing active trip' : 'New trip'} tone="secondary" />
-      </View>
+      <TextInput
+        style={[
+          styles.input,
+          {
+            backgroundColor: theme.colors.backgroundSecondary,
+            borderColor: theme.colors.border,
+            color: theme.colors.text,
+          },
+        ]}
+        placeholder="Example: Book me a 3-day Baguio trip next weekend for 2 people under 12000"
+        placeholderTextColor={theme.colors.textMuted}
+        value={prompt}
+        onChangeText={setPrompt}
+        multiline
+      />
 
-      <View style={styles.form}>
-        <Field
-          label="Destination"
-          value={destinationQuery}
-          onChangeText={setDestinationQuery}
-          placeholder="Tokyo, Cebu, Taipei..."
-        />
-        <View style={styles.splitRow}>
-          <Field
-            label="Start date"
-            value={startDate}
-            onChangeText={setStartDate}
-            placeholder="YYYY-MM-DD"
-          />
-          <Field
-            label="End date"
-            value={endDate}
-            onChangeText={setEndDate}
-            placeholder="YYYY-MM-DD"
-          />
-        </View>
-        <View style={styles.splitRow}>
-          <Field
-            label="Travelers"
-            value={groupSize}
-            onChangeText={setGroupSize}
-            placeholder="1"
-            keyboardType="number-pad"
-          />
-          <Field
-            label="Budget cap"
-            value={budgetCeiling}
-            onChangeText={setBudgetCeiling}
-            placeholder="900"
-            keyboardType="number-pad"
-          />
-        </View>
-        <Field
-          label="Ask the assistant"
-          value={request}
-          onChangeText={setRequest}
-          placeholder="Walkable food spots, easy transit, one museum day"
-          multiline
-        />
-      </View>
-
-      <View style={styles.interestsSection}>
-        <Text style={[styles.sectionLabel, { color: theme.colors.text }]}>Priorities</Text>
-        <View style={styles.interestWrap}>
-          {interestOptions.map((interest) => {
-            const selected = interests.includes(interest);
-            return (
-              <PlannerPressable
-                key={interest}
-                onPress={() => toggleInterest(interest)}
-                style={[
-                  styles.interestChip,
-                  {
-                    backgroundColor: selected
-                      ? theme.colors.accentSecondarySoft
-                      : theme.colors.backgroundSecondary,
-                    borderColor: selected
-                      ? theme.colors.accentSecondary
-                      : theme.colors.border,
-                  },
-                ]}>
-                <Text style={[styles.interestLabel, { color: theme.colors.text }]}>
-                  {interest}
-                </Text>
-              </PlannerPressable>
-            );
-          })}
-        </View>
+      <View style={styles.helperRow}>
+        <Pill label={origin?.country ?? 'Location aware'} tone="secondary" />
+        <Pill label={activeTrip ? 'Uses current trip context' : 'Creates a new trip draft'} tone="secondary" />
       </View>
 
       <PlannerPressable
-        onPress={() => void submit()}
-        style={[
-          styles.submitButton,
-          {
-            backgroundColor: loading ? theme.colors.backgroundSecondary : '#171717',
-          },
-        ]}>
-        <MaterialCommunityIcons
-          name={loading ? 'loading' : 'calendar-star'}
-          size={18}
-          color={loading ? theme.colors.text : '#FFFFFF'}
-        />
-        <Text style={[styles.submitLabel, { color: loading ? theme.colors.text : '#FFFFFF' }]}>
-          {loading ? 'Building live itinerary...' : 'Auto-plan and prepare booking'}
-        </Text>
+        style={[styles.primaryButton, { backgroundColor: theme.colors.surfaceStrong }]}
+        onPress={handleAISearch}
+        disabled={loading || !prompt.trim()}>
+        {loading ? (
+          <ActivityIndicator color="#FFFFFF" size="small" />
+        ) : (
+          <>
+            <MaterialCommunityIcons name="creation-outline" size={18} color="#FFFFFF" />
+            <Text style={styles.primaryButtonLabel}>Draft booking plan</Text>
+          </>
+        )}
       </PlannerPressable>
+
+      {error ? (
+        <Text style={[styles.errorText, { color: theme.colors.textMuted }]}>{error}</Text>
+      ) : null}
+
+      {draft ? (
+        <View
+          style={[
+            styles.draftCard,
+            {
+              backgroundColor: theme.colors.surface,
+              borderColor: theme.colors.border,
+            },
+          ]}>
+          <View style={styles.draftHeader}>
+            <View style={styles.draftHeaderBody}>
+              <Text style={[styles.draftTitle, { color: theme.colors.text }]}>
+                {draft.trip.destination.name}
+              </Text>
+              <Text style={[styles.draftMeta, { color: theme.colors.textMuted }]}>
+                {formatShortDate(draft.trip.startDate)} to {formatShortDate(draft.trip.endDate)} -{' '}
+                {draft.trip.groupSize} traveler{draft.trip.groupSize > 1 ? 's' : ''}
+              </Text>
+            </View>
+            <Pill label={draft.selectedConnection?.mode ?? 'Stay'} tone="secondary" />
+          </View>
+
+          <View style={styles.summaryGrid}>
+            <SummaryCell
+              icon="airplane-takeoff"
+              label="Route"
+              value={draft.selectedConnection?.title ?? 'Stay-first draft'}
+            />
+            <SummaryCell
+              icon="bed-outline"
+              label="Stay"
+              value={draft.selectedStay?.title ?? 'No stay match yet'}
+            />
+            <SummaryCell
+              icon="cash-multiple"
+              label="Estimate"
+              value={formatCurrency(draft.totalEstimatedPrice, {
+                currency: draft.trip.currencyCode,
+              })}
+            />
+            <SummaryCell
+              icon="open-in-new"
+              label="Provider"
+              value={draft.providerLabel}
+            />
+          </View>
+
+          <Text style={[styles.confirmationHint, { color: theme.colors.textMuted }]}>
+            {draft.confirmationHint}
+          </Text>
+
+          {confirmedReference ? (
+            <View
+              style={[
+                styles.confirmedBanner,
+                { backgroundColor: theme.colors.backgroundSecondary },
+              ]}>
+              <MaterialCommunityIcons
+                name="check-decagram-outline"
+                size={18}
+                color={theme.colors.text}
+              />
+              <Text style={[styles.confirmedText, { color: theme.colors.text }]}>
+                Saved locally as booking {confirmedReference}.
+              </Text>
+            </View>
+          ) : null}
+
+          <View style={styles.actionRow}>
+            <PlannerPressable
+              style={[styles.secondaryButton, { backgroundColor: theme.colors.backgroundSecondary }]}
+              onPress={() => {
+                Linking.openURL(draft.providerActionUrl).catch(() => undefined);
+              }}>
+              <MaterialCommunityIcons name="open-in-new" size={16} color={theme.colors.text} />
+              <Text style={[styles.secondaryButtonLabel, { color: theme.colors.text }]}>
+                Open provider
+              </Text>
+            </PlannerPressable>
+            <PlannerPressable
+              style={[styles.confirmButton, { backgroundColor: '#171717' }]}
+              onPress={handleConfirm}>
+              <MaterialCommunityIcons
+                name="check-circle-outline"
+                size={16}
+                color="#FFFFFF"
+              />
+              <Text style={styles.confirmButtonLabel}>Confirm and save</Text>
+            </PlannerPressable>
+          </View>
+        </View>
+      ) : null}
     </SectionCard>
   );
 }
 
-interface FieldProps {
-  label: string;
-  value: string;
-  onChangeText: (value: string) => void;
-  placeholder: string;
-  keyboardType?: 'default' | 'number-pad';
-  multiline?: boolean;
-}
-
-function Field({
+function SummaryCell({
+  icon,
   label,
   value,
-  onChangeText,
-  placeholder,
-  keyboardType = 'default',
-  multiline = false,
-}: FieldProps) {
+}: {
+  icon: keyof typeof MaterialCommunityIcons.glyphMap;
+  label: string;
+  value: string;
+}) {
   const theme = useAppTheme();
 
   return (
-    <View style={styles.field}>
-      <Text style={[styles.fieldLabel, { color: theme.colors.textMuted }]}>{label}</Text>
-      <TextInput
-        value={value}
-        onChangeText={onChangeText}
-        placeholder={placeholder}
-        placeholderTextColor={theme.colors.textMuted}
-        keyboardType={keyboardType}
-        multiline={multiline}
-        style={[
-          styles.input,
-          multiline && styles.multilineInput,
-          {
-            color: theme.colors.text,
-            backgroundColor: theme.colors.surface,
-            borderColor: theme.colors.border,
-          },
-        ]}
-      />
+    <View
+      style={[
+        styles.summaryCell,
+        { backgroundColor: theme.colors.backgroundSecondary },
+      ]}>
+      <MaterialCommunityIcons name={icon} size={16} color={theme.colors.text} />
+      <Text style={[styles.summaryLabel, { color: theme.colors.textMuted }]}>{label}</Text>
+      <Text numberOfLines={2} style={[styles.summaryValue, { color: theme.colors.text }]}>
+        {value}
+      </Text>
     </View>
   );
 }
 
 const styles = StyleSheet.create({
-  card: {
-    gap: 16,
-  },
   header: {
     flexDirection: 'row',
-    gap: 14,
+    justifyContent: 'space-between',
+    gap: 12,
+    marginBottom: 14,
   },
   headerBody: {
     flex: 1,
-    gap: 4,
+    gap: 6,
+  },
+  titleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   title: {
     fontFamily: 'Manrope_700Bold',
@@ -302,76 +273,137 @@ const styles = StyleSheet.create({
     fontSize: 12,
     lineHeight: 18,
   },
-  iconBubble: {
-    width: 44,
-    height: 44,
-    borderRadius: 22,
-    alignItems: 'center',
-    justifyContent: 'center',
-  },
-  pills: {
-    flexDirection: 'row',
-    gap: 10,
-  },
-  form: {
-    gap: 12,
-  },
-  splitRow: {
-    flexDirection: 'row',
-    gap: 12,
-  },
-  field: {
-    flex: 1,
-    gap: 6,
-  },
-  fieldLabel: {
-    fontFamily: 'Manrope_600SemiBold',
-    fontSize: 12,
-  },
   input: {
-    borderWidth: 1,
-    borderRadius: 20,
-    paddingHorizontal: 14,
-    paddingVertical: 12,
-    fontFamily: 'Manrope_600SemiBold',
-    fontSize: 14,
-  },
-  multilineInput: {
     minHeight: 92,
+    borderRadius: 20,
+    borderWidth: 1,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    fontFamily: 'Manrope_500Medium',
+    fontSize: 14,
     textAlignVertical: 'top',
   },
-  interestsSection: {
-    gap: 10,
+  helperRow: {
+    marginTop: 12,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
   },
-  sectionLabel: {
+  primaryButton: {
+    marginTop: 14,
+    borderRadius: 18,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+  },
+  primaryButtonLabel: {
+    color: '#FFFFFF',
     fontFamily: 'Manrope_700Bold',
     fontSize: 14,
   },
-  interestWrap: {
+  errorText: {
+    marginTop: 12,
+    fontFamily: 'Manrope_500Medium',
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  draftCard: {
+    marginTop: 16,
+    borderRadius: 22,
+    padding: 16,
+    borderWidth: 1,
+    gap: 14,
+  },
+  draftHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: 12,
+  },
+  draftHeaderBody: {
+    flex: 1,
+    gap: 4,
+  },
+  draftTitle: {
+    fontFamily: 'Manrope_700Bold',
+    fontSize: 20,
+  },
+  draftMeta: {
+    fontFamily: 'Manrope_500Medium',
+    fontSize: 12,
+  },
+  summaryGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
     gap: 10,
   },
-  interestChip: {
-    borderRadius: 999,
-    borderWidth: 1,
-    paddingHorizontal: 14,
-    paddingVertical: 10,
+  summaryCell: {
+    minWidth: '47%',
+    flexGrow: 1,
+    borderRadius: 16,
+    padding: 12,
+    gap: 4,
   },
-  interestLabel: {
+  summaryLabel: {
+    fontFamily: 'Manrope_600SemiBold',
+    fontSize: 11,
+    textTransform: 'uppercase',
+  },
+  summaryValue: {
+    fontFamily: 'Manrope_700Bold',
+    fontSize: 13,
+    lineHeight: 18,
+  },
+  confirmationHint: {
+    fontFamily: 'Manrope_500Medium',
+    fontSize: 12,
+    lineHeight: 18,
+  },
+  confirmedBanner: {
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  confirmedText: {
+    flex: 1,
     fontFamily: 'Manrope_700Bold',
     fontSize: 12,
   },
-  submitButton: {
-    alignSelf: 'flex-start',
-    borderRadius: 999,
-    paddingHorizontal: 18,
-    paddingVertical: 13,
+  actionRow: {
     flexDirection: 'row',
-    alignItems: 'center',
     gap: 10,
   },
-  submitLabel: {
+  secondaryButton: {
+    flex: 1,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 13,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+  },
+  secondaryButtonLabel: {
+    fontFamily: 'Manrope_700Bold',
+    fontSize: 12,
+  },
+  confirmButton: {
+    flex: 1,
+    borderRadius: 16,
+    paddingHorizontal: 12,
+    paddingVertical: 13,
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 8,
+  },
+  confirmButtonLabel: {
+    color: '#FFFFFF',
     fontFamily: 'Manrope_700Bold',
     fontSize: 12,
   },

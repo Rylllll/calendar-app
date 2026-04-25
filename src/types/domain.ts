@@ -13,8 +13,12 @@ export type BudgetCategory = 'stay' | 'transport' | 'food' | 'activities' | 'buf
 export type DeviceCalendarPermission = 'unknown' | 'granted' | 'denied' | 'unavailable';
 export type DeviceLocationPermission = 'unknown' | 'granted' | 'denied' | 'unavailable';
 export type ItineraryCategory = 'stay' | 'sights' | 'food' | 'coffee' | 'transit';
-export type TransportHubType = 'airport' | 'bus_terminal';
-export type TransportLinkMode = 'flight' | 'bus';
+export type TransportHubType =
+  | 'airport'
+  | 'bus_terminal'
+  | 'rail_station'
+  | 'ferry_terminal';
+export type TransportLinkMode = 'flight' | 'bus' | 'rail';
 
 export interface Coordinates {
   latitude: number;
@@ -209,6 +213,23 @@ export interface TransportConnection {
   bookingUrl: string;
 }
 
+export interface ConfirmedTripBooking {
+  id: string;
+  tripId: string;
+  kind: TransportLinkMode | 'stay';
+  provider: string;
+  reference: string;
+  summary: string;
+  status: 'confirmed';
+  totalAmount: number;
+  currencyCode: string;
+  confirmedAt: string;
+  bookingUrl: string;
+  mapsUrl?: string;
+  routeLabel?: string;
+  stayLabel?: string;
+}
+
 export interface Trip {
   id: string;
   title: string;
@@ -235,6 +256,7 @@ export interface Trip {
   transportHubs: TransportHub[];
   transportConnections: TransportConnection[];
   bookingPreference: BookingPreference;
+  confirmedBooking?: ConfirmedTripBooking;
   weather?: WeatherSnapshot;
 }
 

@@ -1,21 +1,25 @@
-import { useEffect, useState } from 'react';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
+import { useEffect, useState } from 'react';
 import { StyleSheet } from 'react-native';
 
+import { DayTimeline } from '@/components/planner/day-timeline';
 import { DeviceCalendarDetailCard } from '@/components/planner/device-calendar-detail-card';
 import { DeviceCalendarSyncCard } from '@/components/planner/device-calendar-sync-card';
-import { ScreenShell } from '@/components/ui/screen-shell';
-import { PlannerPressable } from '@/components/ui/planner-pressable';
-import { MiniCalendar } from '@/components/planner/mini-calendar';
-import { DayTimeline } from '@/components/planner/day-timeline';
 import { JourneyBridgeCard } from '@/components/planner/journey-bridge-card';
+import { MiniCalendar } from '@/components/planner/mini-calendar';
+import { PlannerPressable } from '@/components/ui/planner-pressable';
+import { ScreenShell } from '@/components/ui/screen-shell';
+import { useAppTheme } from '@/hooks/use-app-theme';
 import { useCalendar } from '@/hooks/use-calendar';
 import { useDeviceCalendar } from '@/hooks/use-device-calendar';
+import { usePlanner } from '@/hooks/use-planner';
 import { useTrip } from '@/hooks/use-trip';
-import { useAppTheme } from '@/hooks/use-app-theme';
 
 export default function CalendarScreen() {
   const theme = useAppTheme();
+  const planner = usePlanner();
+  const isTripMode = planner.tripModeEnabled;
+
   const { days, combinedAgenda, deviceAgenda, selectedDate, setSelectedDate } = useCalendar();
   const trip = useTrip();
   const deviceCalendar = useDeviceCalendar();
@@ -31,7 +35,7 @@ export default function CalendarScreen() {
   return (
     <ScreenShell
       title="Calendar"
-      subtitle="Your planner, AI schedule blocks, and phone calendar merged into one timeline."
+      subtitle={isTripMode ? "Your planner, AI schedule blocks, and phone calendar merged into one timeline." : "Your timeline."}
       rightAction={
         <PlannerPressable
           onPress={() => void deviceCalendar.syncPhoneCalendar()}
@@ -54,18 +58,26 @@ export default function CalendarScreen() {
         lastSyncedAt={deviceCalendar.deviceCalendarLastSyncedAt}
         onSync={() => void deviceCalendar.syncPhoneCalendar()}
       />
-      <JourneyBridgeCard
-        trip={trip.activeTrip}
-        instruction={
-          trip.activeTrip
-            ? 'Use Calendar to confirm real event timing against the active trip, then return to Trip if the transport plan needs adjustment.'
-            : 'Sync the phone calendar first, then add a trip so this timeline can blend real plans with travel buffers.'
-        }
-      />
+      
+      {isTripMode && (
+        <JourneyBridgeCard
+          trip={trip.activeTrip}
+          instruction={
+            trip.activeTrip
+              ? 'Use Calendar to confirm real event timing against the active trip, then return to Trip if the transport plan needs adjustment.'
+              : 'Sync the phone calendar first, then add a trip so this timeline can blend real plans with travel buffers.'
+          }
+        />
+      )}
+      
       <MiniCalendar days={days} selectedDate={selectedDate} onSelect={setSelectedDate} />
+      
       <DayTimeline
-        events={[...trip.predictiveBlocks, ...trip.smartScheduleBlocks, ...combinedAgenda]}
-        title="Unified agenda"
+        events={isTripMode 
+          ? [...trip.predictiveBlocks, ...trip.smartScheduleBlocks, ...combinedAgenda] 
+          : combinedAgenda
+        }
+        title={isTripMode ? "Unified agenda" : "Agenda"}
         selectedEventId={selectedDeviceEventId ? `device-${selectedDeviceEventId}` : null}
         onEventPress={(event) => {
           if (event.source === 'device') {

@@ -61,7 +61,7 @@ function TabItem({ route, isFocused, onPress, theme }: any) {
   );
 }
 
-export function FloatingTabBar({ state, navigation }: BottomTabBarProps) {
+export function FloatingTabBar({ state, navigation, descriptors }: BottomTabBarProps) {
   const theme = useAppTheme();
   const insets = useSafeAreaInsets();
 
@@ -69,6 +69,12 @@ export function FloatingTabBar({ state, navigation }: BottomTabBarProps) {
     <View style={[styles.wrapper, { paddingBottom: Math.max(insets.bottom, 12) }]}>
       <View style={[styles.tabBar, { backgroundColor: theme.colors.tabBar }]}>
         {state.routes.map((route, index) => {
+          const { options } = descriptors[route.key];
+  
+          if ((options as any).href === null) {
+            return null;
+          }
+
           const isFocused = state.index === index;
 
           return (
