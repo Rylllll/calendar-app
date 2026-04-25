@@ -1,56 +1,69 @@
-# Welcome to your Expo app 👋
+# Voyagr Planner
 
-This is an [Expo](https://expo.dev) project created with [`create-expo-app`](https://www.npmjs.com/package/create-expo-app).
+An offline-first calendar and travel planner built with Expo SDK 55, React Native 0.83, Expo Router, TypeScript, Zustand, and AsyncStorage.
 
-## Get started
+## What’s included
 
-1. Install dependencies
+- Local-first planner state with persisted events, trip data, checklist progress, budget entries, booking watches, themes, and QR payloads
+- `app/(tabs)` navigation with a stack route for the map itinerary view
+- Adaptive dashboard that changes when trip mode is active
+- Predictive schedule heuristics for packing, airport transfer, waiting time, and ride reminders
+- Map-based itinerary view with native `react-native-maps` support and a gesture-driven scrubber
+- Gamified checklist, streak/reward themes, collaborative readiness simulation, and a living budget system
+- Weather enhancement via Open-Meteo with graceful offline fallback
 
-   ```bash
-   npm install
-   ```
+## Project structure
 
-2. Start the app
-
-   ```bash
-   npx expo start
-   ```
-
-In the output, you'll find options to open the app in a
-
-- [development build](https://docs.expo.dev/develop/development-builds/introduction/)
-- [Android emulator](https://docs.expo.dev/workflow/android-studio-emulator/)
-- [iOS simulator](https://docs.expo.dev/workflow/ios-simulator/)
-- [Expo Go](https://expo.dev/go), a limited sandbox for trying out app development with Expo
-
-You can start developing by editing the files inside the **app** directory. This project uses [file-based routing](https://docs.expo.dev/router/introduction).
-
-## Get a fresh project
-
-When you're ready, run:
-
-```bash
-npm run reset-project
+```text
+app/
+  _layout.tsx
+  map-itinerary.tsx
+  (tabs)/
+    _layout.tsx
+    index.tsx
+    calendar.tsx
+    trip.tsx
+    budget.tsx
+    settings.tsx
+src/
+  components/
+  hooks/
+  mocks/
+  providers/
+  services/
+  store/
+  theme/
+  types/
+  utils/
 ```
 
-This command will move the starter code to the **app-example** directory and create a blank **app** directory where you can start developing.
+## Run locally
 
-### Other setup steps
+```bash
+npm install
+npm run start
+```
 
-- To set up ESLint for linting, run `npx expo lint`, or follow our guide on ["Using ESLint and Prettier"](https://docs.expo.dev/guides/using-eslint/)
-- If you'd like to set up unit testing, follow our guide on ["Unit Testing with Jest"](https://docs.expo.dev/develop/unit-testing/)
-- Learn more about the TypeScript setup in this template in our guide on ["Using TypeScript"](https://docs.expo.dev/guides/typescript/)
+Useful commands:
 
-## Learn more
+```bash
+npm run android
+npm run ios
+npm run web
+npm run typecheck
+npm run lint
+```
 
-To learn more about developing your project with Expo, look at the following resources:
+## Architecture notes
 
-- [Expo documentation](https://docs.expo.dev/): Learn fundamentals, or go into advanced topics with our [guides](https://docs.expo.dev/guides).
-- [Learn Expo tutorial](https://docs.expo.dev/tutorial/introduction/): Follow a step-by-step tutorial where you'll create a project that runs on Android, iOS, and the web.
+- State management: Zustand store in [src/store/planner-store.ts](/C:/Users/Reymark/Documents/Codex/2026-04-24/you-are-an-expert-react-native/src/store/planner-store.ts)
+- Persistence: AsyncStorage adapter in [src/services/storage.ts](/C:/Users/Reymark/Documents/Codex/2026-04-24/you-are-an-expert-react-native/src/services/storage.ts)
+- Heuristics: travel, logistics, readiness, and budget logic in [src/services/travel-heuristics.ts](/C:/Users/Reymark/Documents/Codex/2026-04-24/you-are-an-expert-react-native/src/services/travel-heuristics.ts)
+- Weather enhancement: [src/services/weather-service.ts](/C:/Users/Reymark/Documents/Codex/2026-04-24/you-are-an-expert-react-native/src/services/weather-service.ts)
+- Theme system: [src/theme/index.ts](/C:/Users/Reymark/Documents/Codex/2026-04-24/you-are-an-expert-react-native/src/theme/index.ts)
 
-## Join the community
+## Notes
 
-Join our community of developers creating universal apps.
-
-- [Expo on GitHub](https://github.com/expo/expo): View our open source platform and contribute.
-- [Discord community](https://chat.expo.dev): Chat with Expo users and ask questions.
+- The app works offline after initial install because planner data persists locally and the weather widget falls back to cached state.
+- `react-native-maps` renders on native platforms. Web uses a lightweight itinerary fallback card instead of a full map.
+- If you want live booking or traffic providers later, replace the service implementations and keep the store/UI layer intact.

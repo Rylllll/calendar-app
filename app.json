@@ -1,14 +1,18 @@
 {
   "expo": {
-    "name": "you-are-an-expert-react-native",
-    "slug": "you-are-an-expert-react-native",
+    "name": "Voyagr Planner",
+    "slug": "voyagr-local-planner",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/images/icon.png",
-    "scheme": "youareanexpertreactnative",
+    "scheme": "voyagrplanner",
     "userInterfaceStyle": "automatic",
     "ios": {
-      "icon": "./assets/expo.icon"
+      "icon": "./assets/expo.icon",
+      "supportsTablet": true,
+      "infoPlist": {
+        "NSLocationWhenInUseUsageDescription": "Voyagr uses your location to improve route timing and local weather while keeping all planning data on-device."
+      }
     },
     "android": {
       "adaptiveIcon": {
@@ -17,7 +21,13 @@
         "backgroundImage": "./assets/images/android-icon-background.png",
         "monochromeImage": "./assets/images/android-icon-monochrome.png"
       },
-      "predictiveBackGestureEnabled": false
+      "predictiveBackGestureEnabled": false,
+      "permissions": [
+        "ACCESS_COARSE_LOCATION",
+        "ACCESS_FINE_LOCATION",
+        "READ_CALENDAR",
+        "WRITE_CALENDAR"
+      ]
     },
     "web": {
       "output": "static",
@@ -26,9 +36,16 @@
     "plugins": [
       "expo-router",
       [
+        "expo-calendar",
+        {
+          "calendarPermission": "Voyagr uses your calendar to sync phone events into your local planner.",
+          "remindersPermission": "Voyagr can optionally read reminders to help complete your schedule context."
+        }
+      ],
+      [
         "expo-splash-screen",
         {
-          "backgroundColor": "#208AEF",
+          "backgroundColor": "#F8F7F4",
           "android": {
             "image": "./assets/images/splash-icon.png",
             "imageWidth": 76
